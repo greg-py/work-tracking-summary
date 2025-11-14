@@ -1,0 +1,34 @@
+{
+  "name": "weekly-jira-tracker",
+  "version": "1.0.0",
+  "description": "Simple weekly Jira tracking tool with AI summaries",
+  "main": "src/index.js",
+  "scripts": {
+    "weekly": "tsx src/index.ts",
+    "weekly:ai": "tsx src/index.ts --ai-summary"
+  },
+  "keywords": [
+    "jira",
+    "tracking",
+    "weekly"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@ai-sdk/amazon-bedrock": "^3.0.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.509.0",
+    "@aws-sdk/credential-providers": "^3.859.0",
+    "ai": "^5.0.0",
+    "axios": "^1.7.9",
+    "chalk": "^5.4.1",
+    "commander": "^11.1.0",
+    "date-fns": "^2.30.0",
+    "dotenv": "^16.4.7",
+    "ora": "^8.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
