@@ -1,4 +1,4 @@
-import { getOptional } from "../utils/validation";
+import { getOptional, validateRequired } from "../utils/validation";
 
 /**
  * LLM/AI configuration
@@ -7,6 +7,26 @@ export interface LLMConfig {
   model: string;
   temperature: number;
   region: string;
+  businessDomains: string[];
+}
+
+/**
+ * Parses and validates the business domains from a comma-separated string
+ */
+function parseBusinessDomains(domainsRaw: string): string[] {
+  const domains = domainsRaw
+    .split(",")
+    .map((d) => d.trim())
+    .filter((d) => d.length > 0);
+
+  if (domains.length === 0) {
+    throw new Error(
+      `Invalid BUSINESS_DOMAINS: no valid domains found after parsing.\n` +
+        `Provide a comma-separated list of domain names (e.g., "Workflows,Documents,AI")`
+    );
+  }
+
+  return domains;
 }
 
 /**
@@ -24,6 +44,13 @@ export function getLLMConfig(): LLMConfig {
 
   const region = getOptional(process.env.AWS_REGION, "us-east-1");
 
+  // Business domains are required
+  const domainsRaw = validateRequired(
+    "BUSINESS_DOMAINS",
+    process.env.BUSINESS_DOMAINS
+  );
+  const businessDomains = parseBusinessDomains(domainsRaw);
+
   // Validate temperature range
   if (isNaN(temperature) || temperature < 0 || temperature > 1) {
     throw new Error(
@@ -36,6 +63,6 @@ export function getLLMConfig(): LLMConfig {
     model,
     temperature,
     region,
+    businessDomains,
   };
 }
-

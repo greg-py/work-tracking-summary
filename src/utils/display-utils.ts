@@ -95,9 +95,34 @@ export function displayInfo(message: string): void {
 }
 
 /**
- * Displays an AI-generated summary with proper formatting
+ * Extracts a human-friendly model name from the Bedrock model ID
  */
-export function displayAISummary(summary: string): void {
+function getModelDisplayName(modelId: string): string {
+  // Map common model IDs to friendly names
+  const modelMappings: Record<string, string> = {
+    "claude-sonnet-4": "Claude Sonnet 4",
+    "claude-3-5-sonnet": "Claude 3.5 Sonnet",
+    "claude-3-sonnet": "Claude 3 Sonnet",
+    "claude-3-haiku": "Claude 3 Haiku",
+    "claude-3-opus": "Claude 3 Opus",
+  };
+
+  for (const [pattern, name] of Object.entries(modelMappings)) {
+    if (modelId.includes(pattern)) {
+      return name;
+    }
+  }
+
+  // Fallback: extract the model name from the ID
+  return modelId.split(":")[0].split(".").pop() || modelId;
+}
+
+/**
+ * Displays an AI-generated summary with proper formatting
+ * @param summary - The AI-generated summary text
+ * @param modelId - Optional model ID for display (defaults to generic message)
+ */
+export function displayAISummary(summary: string, modelId?: string): void {
   console.log(
     "\n" + chalk.bold.magenta("🤖 AI-Generated Weekly Summary") + "\n"
   );
@@ -107,20 +132,42 @@ export function displayAISummary(summary: string): void {
   lines.forEach((line) => {
     if (line.trim() === "") {
       console.log("");
+    } else if (line.match(/^\*\*[^*]+:\*\*/)) {
+      // Domain headers with colon (e.g., "**Workflows:**")
+      // Extract the domain name and the rest of the line
+      const match = line.match(/^\*\*([^*]+):\*\*\s*(.*)/);
+      if (match) {
+        const [, domain, description] = match;
+        console.log(
+          `${chalk.bold.cyan(`• ${domain}:`)} ${chalk.white(description)}`
+        );
+      } else {
+        console.log(chalk.white(line));
+      }
     } else if (line.startsWith("**") && line.endsWith("**")) {
-      // Section headers
+      // Section headers without description
       const header = line.replace(/\*\*/g, "");
-      console.log(chalk.bold.cyan(header));
-    } else if (line.startsWith("- ")) {
-      // Bullet points
-      console.log(chalk.white(line));
+      console.log(chalk.bold.cyan(`• ${header}`));
+    } else if (line.startsWith("- ") || line.startsWith("• ")) {
+      // Bullet points - format the domain if present
+      const bulletContent = line.replace(/^[-•]\s*/, "");
+      const match = bulletContent.match(/^\*\*([^*]+):\*\*\s*(.*)/);
+      if (match) {
+        const [, domain, description] = match;
+        console.log(
+          `  ${chalk.bold.cyan(`${domain}:`)} ${chalk.white(description)}`
+        );
+      } else {
+        console.log(chalk.white(`  ${bulletContent}`));
+      }
     } else {
       // Regular text
       console.log(chalk.white(line));
     }
   });
 
+  const modelName = modelId ? getModelDisplayName(modelId) : "Claude";
   console.log(
-    "\n" + chalk.gray("Generated using Amazon Bedrock with Claude 3.5 Sonnet")
+    "\n" + chalk.gray(`Generated using Amazon Bedrock with ${modelName}`)
   );
 }

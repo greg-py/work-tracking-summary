@@ -5,11 +5,13 @@ A clean, simple tool for generating weekly snapshots and summaries of Jira issue
 ## Quick Start
 
 1. **Install dependencies**:
+
    ```bash
    pnpm install
    ```
 
 2. **Configure your environment**:
+
    ```bash
    cp .env.example .env
    # Edit .env with your Jira credentials and team members
@@ -33,16 +35,19 @@ That's it! See [SETUP.md](SETUP.md) for detailed configuration instructions.
 ## Usage
 
 ### Basic Weekly Report
+
 ```bash
 pnpm weekly
 ```
 
 This will:
+
 1. Fetch current Jira issues for your team
 2. Generate a categorized summary showing completed, continued, and started items
 3. Save the data to `./data/YYYY-MM-DD.json`
 
 ### AI-Powered Summary
+
 ```bash
 pnpm weekly:ai
 # or
@@ -50,6 +55,7 @@ pnpm weekly --ai-summary
 ```
 
 This will:
+
 1. Fetch current Jira issues
 2. Generate an AI-powered, human-friendly summary using Amazon Bedrock
 3. Save the data to `./data/YYYY-MM-DD.json`
@@ -66,6 +72,10 @@ JIRA_URL=https://your-company.atlassian.net
 JIRA_USERNAME=your-email@company.com
 JIRA_TOKEN=your-jira-api-token-here
 JIRA_ASSIGNEE_EMAILS=member1@company.com,member2@company.com
+
+# Business Domains for AI Summary Categorization
+# Comma-separated list of domain names - the AI will categorize work into these exact domains
+BUSINESS_DOMAINS=Meetings,Workflows,User Management,Documents,RBAC (Role-Based Access Control),AI,Integrations
 ```
 
 ### Optional Configuration
@@ -74,10 +84,12 @@ JIRA_ASSIGNEE_EMAILS=member1@company.com,member2@company.com
 # AWS Configuration (for AI summaries)
 AWS_REGION=us-east-1
 
+# LLM Settings
+LLM_MODEL=us.anthropic.claude-sonnet-4-20250514-v1:0
+LLM_TEMPERATURE=0.3
+
 # Application Settings
 DATA_DIRECTORY=./data
-LLM_MODEL=anthropic.claude-3-5-sonnet-20240620-v1:0
-LLM_TEMPERATURE=0.3
 ```
 
 See `.env.example` for all available options with detailed comments.
@@ -120,6 +132,7 @@ The tool automatically categorizes Jira issues:
 ### Data Storage
 
 All snapshots are saved as JSON files in the `./data/` directory with the format `YYYY-MM-DD.json`. This allows you to:
+
 - Track progress over time
 - Generate historical reports
 - Maintain a record of team activity
@@ -127,10 +140,14 @@ All snapshots are saved as JSON files in the `./data/` directory with the format
 ### AI Summaries
 
 When using the `--ai-summary` flag, the tool:
+
 1. Processes categorized tickets
-2. Sends them to Amazon Bedrock (Claude 3.5 Sonnet)
-3. Generates human-friendly, non-technical descriptions
-4. Focuses on business value and outcomes
+2. Sends them to Amazon Bedrock (Claude)
+3. Categorizes work into your team's **business domains** (defined in `BUSINESS_DOMAINS`)
+4. Generates human-friendly, non-technical descriptions
+5. Focuses on business value and outcomes
+
+The `BUSINESS_DOMAINS` environment variable is required and should contain a comma-separated list of your team's focus areas. The AI will organize all ticket summaries into these exact categories.
 
 ## Architecture
 
@@ -152,22 +169,26 @@ The codebase follows clean architecture principles:
 ## Troubleshooting
 
 ### Jira Connection Issues
+
 - Verify your `.env` file has correct `JIRA_URL`, `JIRA_USERNAME`, and `JIRA_TOKEN`
 - Ensure your API token has the necessary permissions
 - Check that your `JIRA_URL` has no trailing slash
 
 ### AWS/AI Summary Issues
+
 - Check your AWS credentials configuration (`aws configure`)
 - Ensure you have permissions for Amazon Bedrock
 - Verify the Claude model is available in your region
 - Confirm you've requested model access in the Bedrock console
 
 ### Invalid Configuration
+
 - Compare your `.env` file against `.env.example`
 - Check email formats in `JIRA_ASSIGNEE_EMAILS` (no spaces around commas)
 - Validate your `JIRA_URL` includes `https://`
 
 ### No Issues Found
+
 - Verify team members are correctly listed in `JIRA_ASSIGNEE_EMAILS`
 - Check that issues are assigned to active sprints
 - Ensure the email addresses match those in Jira

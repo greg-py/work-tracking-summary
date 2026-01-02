@@ -32,6 +32,7 @@ pnpm install
 Your Jira URL is typically: `https://your-company.atlassian.net`
 
 You can find it by:
+
 - Looking at your browser's address bar when you're logged into Jira
 - It's the domain before `/jira/` or `/browse/`
 
@@ -57,6 +58,10 @@ JIRA_TOKEN=your-jira-api-token-here
 
 # Required: Team member emails (comma-separated)
 JIRA_ASSIGNEE_EMAILS=alice@company.com,bob@company.com,charlie@company.com
+
+# Required: Business domains for AI summary categorization
+# The AI will organize ticket summaries into these exact categories
+BUSINESS_DOMAINS=Meetings,Workflows,User Management,Documents,RBAC (Role-Based Access Control),AI,Integrations
 ```
 
 ### Important Notes
@@ -65,6 +70,7 @@ JIRA_ASSIGNEE_EMAILS=alice@company.com,bob@company.com,charlie@company.com
 - **JIRA_USERNAME**: Your Jira account email
 - **JIRA_TOKEN**: The API token from Step 2.1
 - **JIRA_ASSIGNEE_EMAILS**: Comma-separated, no spaces around commas
+- **BUSINESS_DOMAINS**: Comma-separated list of your team's focus areas for AI categorization
 
 ## Step 4: Configure AWS (Optional - For AI Summaries)
 
@@ -115,27 +121,32 @@ pnpm weekly
 ```
 
 If everything is configured correctly, you should see:
+
 1. A spinner while fetching issues
 2. A success message with the snapshot filename
 3. A categorized summary of tickets
 
 ### Common Issues
 
-**"Missing required environment variable: JIRA_URL"**
+**"Missing required environment variable: JIRA_URL"** (or BUSINESS_DOMAINS, etc.)
+
 - Check that your `.env` file exists in the project root
-- Ensure all required variables are set
+- Ensure all required variables are set (JIRA_URL, JIRA_USERNAME, JIRA_TOKEN, JIRA_ASSIGNEE_EMAILS, BUSINESS_DOMAINS)
 
 **"Invalid email format"**
+
 - Check that `JIRA_ASSIGNEE_EMAILS` are properly formatted
 - Ensure no spaces around commas
 - Example: `alice@company.com,bob@company.com`
 
 **"Error fetching issues"**
+
 - Verify your `JIRA_URL` is correct (no trailing slash)
 - Check that your `JIRA_TOKEN` is valid
 - Ensure your account has permission to view the issues
 
 **"No snapshots found"**
+
 - This means you need to run `pnpm weekly` first to create a snapshot
 - Snapshots are saved in the `./data/` directory
 
@@ -197,6 +208,7 @@ data/
 ```
 
 Each file contains:
+
 - All issues assigned to your team members
 - Issue details (status, description, story points, etc.)
 - Timestamp of when the data was pulled
@@ -221,7 +233,7 @@ Create `.github/workflows/weekly-report.yml`:
 name: Weekly Report
 on:
   schedule:
-    - cron: '0 17 * * 5'  # Every Friday at 5 PM UTC
+    - cron: "0 17 * * 5" # Every Friday at 5 PM UTC
   workflow_dispatch:
 
 jobs:
@@ -233,7 +245,7 @@ jobs:
       - uses: actions/setup-node@v3
         with:
           node-version: 18
-          cache: 'pnpm'
+          cache: "pnpm"
       - run: pnpm install
       - run: pnpm weekly:ai
         env:
@@ -241,6 +253,7 @@ jobs:
           JIRA_USERNAME: ${{ secrets.JIRA_USERNAME }}
           JIRA_TOKEN: ${{ secrets.JIRA_TOKEN }}
           JIRA_ASSIGNEE_EMAILS: ${{ secrets.JIRA_ASSIGNEE_EMAILS }}
+          BUSINESS_DOMAINS: ${{ secrets.BUSINESS_DOMAINS }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           AWS_REGION: us-east-1
@@ -259,4 +272,3 @@ jobs:
 - The `.env` file is already in `.gitignore`
 - Use environment variables or secrets management for production deployments
 - Rotate your Jira API tokens regularly
-

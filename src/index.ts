@@ -56,7 +56,7 @@ program
         spinner.start("Generating AI summary...");
         const aiSummary = await weeklyService.generateAISummary(filename);
         spinner.succeed("AI summary generated!");
-        displayAISummary(aiSummary);
+        displayAISummary(aiSummary, config.llm.model);
       } else {
         spinner.start("Generating summary...");
         const summary = await weeklyService.generateSummary(filename);

@@ -68,35 +68,46 @@ export class LLMService {
    * Builds the prompt for the LLM
    */
   private buildPrompt(ticketList: string): string {
+    const domainsFormatted = this.config.businessDomains
+      .map((d) => `- ${d}`)
+      .join("\n");
+
     return `Analyze the following software development tickets and create a brief weekly summary.
 
 IMPORTANT: This summary will be shared company-wide with non-technical audiences. Write in simple, clear language that anyone can understand.
 
+CRITICAL REQUIREMENT - DOMAIN CATEGORIZATION:
+You MUST categorize ALL work into ONLY the following business domains. Do not create your own categories or use different names:
+
+${domainsFormatted}
+
 Your task:
 1. Review all ticket titles and descriptions to understand the work completed and in progress
-2. Identify 3-5 main themes or domains (e.g., Reviews, Infrastructure, System Performance, Bug Fixes, Notifications, etc.)
-3. Group related work under each theme
-4. Write a SHORT, punchy summary for each theme (1-2 sentences max)
+2. Categorize each piece of work into one of the EXACT domains listed above
+3. Only include domains that have relevant work (aim for 3-5 sections total)
+4. Write a SHORT, punchy summary for each domain (1-2 sentences max)
 
-Format your response as 3-5 bullet points where:
-- Each bullet starts with the theme/domain in bold (e.g., "**Reviews:**")
+Format your response as bullet points where:
+- Each bullet starts with the EXACT domain name in bold (e.g., "**Workflows:**")
 - Follow with a BRIEF summary (1-2 sentences) of the key work in that area
 - Use simple, non-technical language - avoid jargon, acronyms, and technical terms (no "API", "RESTful", "ECS", etc.)
 - Focus on the business value or user benefit, not technical implementation
 - Be concise and direct - focus on the most important accomplishments
 - Avoid ticket numbers and excessive detail
 - Write for a general company-wide audience
+- Skip domains that have no relevant work this week
 
 Example format:
-**Reviews:** Made improvements to review workflows so deleted templates can still be used, streamlined the process for creating and managing review forms.
+**Workflows:** Made improvements to review workflows so deleted templates can still be used, streamlined the process for creating and managing review forms.
 
-**System Performance:** Improved system scalability and reliability, fixed deployment issues that were causing delays.
+**User Management:** Enhanced user onboarding experience with clearer instructions and faster account setup.
+
+**Documents:** Improved document sharing capabilities and fixed issues with file uploads.
 
 Now analyze these tickets:
 
 ${ticketList}
 
-Provide exactly 3-5 thematic bullet points summarizing the week's work. Keep each bullet concise (1-2 sentences) and non-technical.`;
+Provide 3-5 bullet points using ONLY the exact domain names listed above. Skip any domains with no relevant work. Keep each bullet concise (1-2 sentences) and non-technical.`;
   }
-
 }
