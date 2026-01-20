@@ -28,8 +28,10 @@ export interface JiraIssue {
     description: JiraContent | null;
     issuetype: { name: string };
     statuscategorychangedate: string;
-    parent: { key: string } | null;
+    parent: { key: string; fields?: { summary: string } } | null;
     customfield_10026: number | null;
+    labels?: string[];
+    components?: { name: string }[];
   };
 }
 
@@ -47,6 +49,9 @@ export interface ProcessedIssue {
   description: string;
   storyPoints: number | null;
   parent: string | null;
+  parentSummary: string | null;
+  labels: string[];
+  components: string[];
   datePulled: string;
 }
 
@@ -60,6 +65,11 @@ export type ProcessedIssuesMap = Record<string, ProcessedIssue[]>;
 // ============================================
 
 /**
+ * Progress status for categorized tickets
+ */
+export type ProgressStatus = "completed" | "continued" | "started";
+
+/**
  * Simplified ticket representation for categorization
  */
 export interface Ticket {
@@ -69,6 +79,11 @@ export interface Ticket {
   daysInCurrentStatus: number;
   issueType: string;
   description: string;
+  labels: string[];
+  components: string[];
+  parent: string | null;
+  parentSummary: string | null;
+  progressStatus: ProgressStatus;
 }
 
 /**
@@ -80,3 +95,58 @@ export interface CategorizedTickets {
   startedItems: Ticket[];
 }
 
+// ============================================
+// Snapshot Comparison Types
+// ============================================
+
+/**
+ * Represents changes between two snapshots
+ */
+export interface SnapshotDiff {
+  /** Tickets that are new (not in previous snapshot) */
+  newTickets: ProcessedIssue[];
+  /** Tickets that changed status since previous snapshot */
+  statusChanges: StatusChange[];
+  /** Tickets that were completed this period */
+  completedThisPeriod: ProcessedIssue[];
+  /** Tickets that are no longer in current snapshot (removed or reassigned) */
+  removedTickets: ProcessedIssue[];
+}
+
+/**
+ * Represents a status change for a ticket
+ */
+export interface StatusChange {
+  ticket: ProcessedIssue;
+  previousStatus: string;
+  currentStatus: string;
+}
+
+// ============================================
+// LLM Context Types
+// ============================================
+
+/**
+ * Enhanced ticket context for LLM processing
+ * Includes all relevant information for generating summaries
+ */
+export interface TicketContext {
+  ticketId: string;
+  summary: string;
+  description: string;
+  progressStatus: ProgressStatus;
+  labels: string[];
+  components: string[];
+  parentContext: string | null;
+  daysInCurrentStatus: number;
+}
+
+/**
+ * Grouped tickets ready for LLM processing
+ */
+export interface LLMTicketContext {
+  completed: TicketContext[];
+  continued: TicketContext[];
+  started: TicketContext[];
+  totalCount: number;
+}

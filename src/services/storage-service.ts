@@ -1,10 +1,15 @@
 import fs from "fs/promises";
 import path from "path";
-import { ProcessedIssuesMap } from "../types";
+import {
+  ProcessedIssuesMap,
+  ProcessedIssue,
+  SnapshotDiff,
+  StatusChange,
+} from "../types";
 
 /**
  * Service responsible for all file I/O operations
- * Handles snapshot storage, retrieval, and listing
+ * Handles snapshot storage, retrieval, listing, and comparison
  */
 export class StorageService {
   constructor(private readonly dataDirectory: string) {}
@@ -81,6 +86,20 @@ export class StorageService {
   }
 
   /**
+   * Gets the path to the previous snapshot file (second most recent)
+   * @returns Full path to the previous snapshot, or null if not available
+   */
+  async getPreviousSnapshot(): Promise<string | null> {
+    const snapshots = await this.listSnapshots();
+
+    if (snapshots.length < 2) {
+      return null;
+    }
+
+    return path.join(this.dataDirectory, snapshots[1]);
+  }
+
+  /**
    * Checks if a snapshot file exists
    * @param fileName - Path to check
    * @returns True if file exists, false otherwise
@@ -92,6 +111,135 @@ export class StorageService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Compares two snapshots and returns the differences
+   * @param currentSnapshot - Path to the current (newer) snapshot
+   * @param previousSnapshot - Path to the previous (older) snapshot
+   * @returns SnapshotDiff containing all changes between snapshots
+   */
+  async compareSnapshots(
+    currentSnapshot: string,
+    previousSnapshot: string
+  ): Promise<SnapshotDiff> {
+    const [currentData, previousData] = await Promise.all([
+      this.loadSnapshot(currentSnapshot),
+      this.loadSnapshot(previousSnapshot),
+    ]);
+
+    // Flatten both snapshots into arrays
+    const currentIssues = this.flattenSnapshot(currentData);
+    const previousIssues = this.flattenSnapshot(previousData);
+
+    // Build maps for quick lookup
+    const currentMap = new Map(currentIssues.map((i) => [i.ticketId, i]));
+    const previousMap = new Map(previousIssues.map((i) => [i.ticketId, i]));
+
+    // Find new tickets (in current but not in previous)
+    const newTickets: ProcessedIssue[] = [];
+    currentIssues.forEach((issue) => {
+      if (!previousMap.has(issue.ticketId)) {
+        newTickets.push(issue);
+      }
+    });
+
+    // Find status changes
+    const statusChanges: StatusChange[] = [];
+    currentIssues.forEach((issue) => {
+      const previousIssue = previousMap.get(issue.ticketId);
+      if (previousIssue && previousIssue.status !== issue.status) {
+        statusChanges.push({
+          ticket: issue,
+          previousStatus: previousIssue.status,
+          currentStatus: issue.status,
+        });
+      }
+    });
+
+    // Find tickets completed this period (status changed to Done)
+    const completedThisPeriod: ProcessedIssue[] = statusChanges
+      .filter((change) => change.currentStatus === "Done")
+      .map((change) => change.ticket);
+
+    // Find removed tickets (in previous but not in current)
+    const removedTickets: ProcessedIssue[] = [];
+    previousIssues.forEach((issue) => {
+      if (!currentMap.has(issue.ticketId)) {
+        removedTickets.push(issue);
+      }
+    });
+
+    return {
+      newTickets,
+      statusChanges,
+      completedThisPeriod,
+      removedTickets,
+    };
+  }
+
+  /**
+   * Flattens a ProcessedIssuesMap into an array of ProcessedIssue
+   */
+  private flattenSnapshot(data: ProcessedIssuesMap): ProcessedIssue[] {
+    return Object.values(data).flat();
+  }
+
+  /**
+   * Generates a comparison summary between two snapshots
+   * @param currentSnapshot - Path to the current snapshot
+   * @param previousSnapshot - Path to the previous snapshot
+   * @returns Human-readable summary of changes
+   */
+  async generateComparisonSummary(
+    currentSnapshot: string,
+    previousSnapshot: string
+  ): Promise<string> {
+    const diff = await this.compareSnapshots(currentSnapshot, previousSnapshot);
+
+    const lines: string[] = [];
+    lines.push("=== Snapshot Comparison ===\n");
+
+    lines.push(`New tickets this period: ${diff.newTickets.length}`);
+    if (diff.newTickets.length > 0) {
+      diff.newTickets.slice(0, 10).forEach((t) => {
+        lines.push(`  • [${t.ticketId}] ${t.summary}`);
+      });
+      if (diff.newTickets.length > 10) {
+        lines.push(`  ... and ${diff.newTickets.length - 10} more`);
+      }
+    }
+
+    lines.push(`\nCompleted this period: ${diff.completedThisPeriod.length}`);
+    if (diff.completedThisPeriod.length > 0) {
+      diff.completedThisPeriod.forEach((t) => {
+        lines.push(`  ✓ [${t.ticketId}] ${t.summary}`);
+      });
+    }
+
+    lines.push(`\nStatus changes: ${diff.statusChanges.length}`);
+    if (diff.statusChanges.length > 0) {
+      diff.statusChanges.slice(0, 10).forEach((change) => {
+        lines.push(
+          `  • [${change.ticket.ticketId}] ${change.previousStatus} → ${change.currentStatus}`
+        );
+      });
+      if (diff.statusChanges.length > 10) {
+        lines.push(`  ... and ${diff.statusChanges.length - 10} more`);
+      }
+    }
+
+    lines.push(`\nRemoved from tracking: ${diff.removedTickets.length}`);
+    if (diff.removedTickets.length > 0) {
+      diff.removedTickets.slice(0, 5).forEach((t) => {
+        lines.push(`  − [${t.ticketId}] ${t.summary}`);
+      });
+      if (diff.removedTickets.length > 5) {
+        lines.push(`  ... and ${diff.removedTickets.length - 5} more`);
+      }
+    }
+
+    return lines.join("\n");
   }
 }
 

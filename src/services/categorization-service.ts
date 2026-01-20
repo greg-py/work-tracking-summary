@@ -1,17 +1,37 @@
-import { ProcessedIssue, Ticket, CategorizedTickets } from "../types";
+import {
+  ProcessedIssue,
+  Ticket,
+  CategorizedTickets,
+  ProgressStatus,
+} from "../types";
+import { AppConfig } from "../config/config";
 
 /**
- * Number of days used as threshold for categorization
- * - Completed: Done within this many days
- * - Continued: In progress for more than this many days
- * - Started: In progress for less than this many days
+ * Configuration options for the categorization service
  */
-const CATEGORIZATION_THRESHOLD_DAYS = 7;
+export interface CategorizationConfig {
+  /** Number of days used as threshold for categorization */
+  thresholdDays: number;
+  /** Issue types to exclude from summaries (lowercase) */
+  excludedIssueTypes: string[];
+  /** Whether to include sub-tasks in output */
+  includeSubTasks: boolean;
+}
 
 /**
  * Service responsible for categorizing tickets based on status and time
  */
 export class CategorizationService {
+  private readonly config: CategorizationConfig;
+
+  constructor(appConfig?: AppConfig) {
+    this.config = {
+      thresholdDays: appConfig?.categorizationThresholdDays ?? 7,
+      excludedIssueTypes: appConfig?.excludedIssueTypes ?? [],
+      includeSubTasks: appConfig?.includeSubTasks ?? true,
+    };
+  }
+
   /**
    * Categorizes tickets into completed, continued, and started items
    * @param tickets - Array of processed issues to categorize
@@ -22,20 +42,50 @@ export class CategorizationService {
     const continuedItems: Ticket[] = [];
     const startedItems: Ticket[] = [];
 
+    // Build a map of parent tickets for sub-task aggregation
+    const parentTicketMap = this.buildParentTicketMap(tickets);
+
     tickets.forEach((ticket) => {
-      // Skip sub-tasks - we only want parent-level items
-      if (this.isSubTask(ticket.issueType)) {
+      // Skip excluded issue types
+      if (this.isExcludedIssueType(ticket.issueType)) {
         return;
       }
 
-      const categorizedTicket = this.toTicket(ticket);
+      // Handle sub-tasks based on configuration
+      if (this.isSubTask(ticket.issueType)) {
+        if (!this.config.includeSubTasks) {
+          return;
+        }
+        // Sub-tasks are included but with parent context enriched
+      }
 
+      // Determine progress status
+      let progressStatus: ProgressStatus;
       if (this.isCompleted(ticket)) {
-        completedItems.push(categorizedTicket);
+        progressStatus = "completed";
       } else if (this.isContinued(ticket)) {
-        continuedItems.push(categorizedTicket);
+        progressStatus = "continued";
       } else if (this.isStarted(ticket)) {
-        startedItems.push(categorizedTicket);
+        progressStatus = "started";
+      } else {
+        // Skip tickets that don't fit any category (e.g., TO DO status)
+        return;
+      }
+
+      // Create categorized ticket with progress status
+      const categorizedTicket = this.toTicket(ticket, progressStatus);
+
+      // Add to appropriate category
+      switch (progressStatus) {
+        case "completed":
+          completedItems.push(categorizedTicket);
+          break;
+        case "continued":
+          continuedItems.push(categorizedTicket);
+          break;
+        case "started":
+          startedItems.push(categorizedTicket);
+          break;
       }
     });
 
@@ -43,10 +93,39 @@ export class CategorizationService {
   }
 
   /**
+   * Builds a map of parent ticket IDs to their details for sub-task enrichment
+   */
+  private buildParentTicketMap(
+    tickets: ProcessedIssue[]
+  ): Map<string, ProcessedIssue> {
+    const parentMap = new Map<string, ProcessedIssue>();
+    tickets.forEach((ticket) => {
+      parentMap.set(ticket.ticketId, ticket);
+    });
+    return parentMap;
+  }
+
+  /**
+   * Checks if an issue type should be excluded
+   */
+  private isExcludedIssueType(issueType: string): boolean {
+    const normalizedType = issueType.toLowerCase();
+    return this.config.excludedIssueTypes.some(
+      (excluded) =>
+        normalizedType.includes(excluded) || excluded.includes(normalizedType)
+    );
+  }
+
+  /**
    * Checks if a ticket is a sub-task
    */
   private isSubTask(issueType: string): boolean {
-    return issueType.toLowerCase().includes("sub-task");
+    const normalizedType = issueType.toLowerCase();
+    return (
+      normalizedType.includes("sub-task") ||
+      normalizedType.includes("subtask") ||
+      normalizedType === "sub-task"
+    );
   }
 
   /**
@@ -55,7 +134,7 @@ export class CategorizationService {
   private isCompleted(ticket: ProcessedIssue): boolean {
     return (
       ticket.status === "Done" &&
-      ticket.daysInCurrentStatus < CATEGORIZATION_THRESHOLD_DAYS
+      ticket.daysInCurrentStatus < this.config.thresholdDays
     );
   }
 
@@ -66,7 +145,7 @@ export class CategorizationService {
     return (
       ticket.status !== "Done" &&
       ticket.status !== "TO DO" &&
-      ticket.daysInCurrentStatus > CATEGORIZATION_THRESHOLD_DAYS
+      ticket.daysInCurrentStatus > this.config.thresholdDays
     );
   }
 
@@ -77,14 +156,17 @@ export class CategorizationService {
     return (
       ticket.status !== "Done" &&
       ticket.status !== "TO DO" &&
-      ticket.daysInCurrentStatus < CATEGORIZATION_THRESHOLD_DAYS
+      ticket.daysInCurrentStatus <= this.config.thresholdDays
     );
   }
 
   /**
-   * Converts a ProcessedIssue to a Ticket
+   * Converts a ProcessedIssue to a Ticket with progress status
    */
-  private toTicket(issue: ProcessedIssue): Ticket {
+  private toTicket(
+    issue: ProcessedIssue,
+    progressStatus: ProgressStatus
+  ): Ticket {
     return {
       ticketId: issue.ticketId,
       summary: issue.summary,
@@ -92,7 +174,11 @@ export class CategorizationService {
       daysInCurrentStatus: issue.daysInCurrentStatus,
       issueType: issue.issueType,
       description: issue.description,
+      labels: issue.labels,
+      components: issue.components,
+      parent: issue.parent,
+      parentSummary: issue.parentSummary,
+      progressStatus,
     };
   }
 }
-

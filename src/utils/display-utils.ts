@@ -13,6 +13,15 @@ export function displayWeeklySummary(summary: CategorizedTickets): void {
   displaySection("🆕 Started Items", startedItems, chalk.blue);
 
   // Display summary statistics
+  displayReportStats(summary);
+}
+
+/**
+ * Displays report statistics in a formatted way
+ */
+export function displayReportStats(summary: CategorizedTickets): void {
+  const { completedItems, continuedItems, startedItems } = summary;
+
   console.log("\n" + chalk.bold("📈 Summary Statistics:"));
   console.log(`  ${chalk.green("Completed:")} ${completedItems.length}`);
   console.log(`  ${chalk.yellow("Continued:")} ${continuedItems.length}`);
@@ -47,7 +56,35 @@ function displaySection(
     console.log(
       `    ${chalk.gray(`Status: ${ticket.status} (${statusInfo})`)}`
     );
+
+    // Show labels and components if present
+    if (ticket.labels.length > 0 || ticket.components.length > 0) {
+      const hints: string[] = [];
+      if (ticket.labels.length > 0) {
+        hints.push(`Labels: ${ticket.labels.join(", ")}`);
+      }
+      if (ticket.components.length > 0) {
+        hints.push(`Components: ${ticket.components.join(", ")}`);
+      }
+      console.log(`    ${chalk.gray(hints.join(" | "))}`);
+    }
+
+    // Show parent context if present
+    if (ticket.parent) {
+      const parentInfo = ticket.parentSummary
+        ? `${ticket.parent}: ${ticket.parentSummary}`
+        : ticket.parent;
+      console.log(`    ${chalk.gray(`Part of: ${parentInfo}`)}`);
+    }
   });
+}
+
+/**
+ * Displays a comparison summary between snapshots
+ */
+export function displayComparisonSummary(summary: string): void {
+  console.log("\n" + chalk.bold.cyan("📊 Week-over-Week Comparison") + "\n");
+  console.log(chalk.white(summary));
 }
 
 /**

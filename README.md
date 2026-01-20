@@ -1,6 +1,6 @@
 # Weekly Jira Tracker
 
-A clean, simple tool for generating weekly snapshots and summaries of Jira issues with optional AI-powered insights.
+A powerful tool for generating weekly snapshots and AI-powered summaries of Jira issues. Designed to produce manager-ready weekly updates with minimal manual editing.
 
 ## Quick Start
 
@@ -19,7 +19,7 @@ A clean, simple tool for generating weekly snapshots and summaries of Jira issue
 
 3. **Run your first report**:
    ```bash
-   pnpm weekly
+   pnpm weekly:ai
    ```
 
 That's it! See [SETUP.md](SETUP.md) for detailed configuration instructions.
@@ -28,9 +28,15 @@ That's it! See [SETUP.md](SETUP.md) for detailed configuration instructions.
 
 - **Weekly Snapshots**: Automatically fetches and saves Jira issues to JSON files
 - **Smart Categorization**: Categorizes tickets as completed, continued, or started based on status and time
-- **AI Summaries**: Generate human-friendly summaries using Amazon Bedrock with Claude 3.5 Sonnet
-- **Data Preservation**: All snapshots are saved to the `./data/` directory for historical tracking
-- **Easy Configuration**: All settings in `.env` file - just copy `.env.example` and fill in your values
+- **Progress-Aware Summaries**: AI uses appropriate language based on whether work was completed, started, or is ongoing
+- **Domain Categorization**: Automatically categorizes work into your team's business domains with "Other" fallback
+- **Label/Component Hints**: Uses Jira labels and components to improve domain classification
+- **Parent Ticket Context**: Automatically fetches parent ticket summaries for sub-tasks
+- **Issue Type Filtering**: Exclude automated tests and other noise from summaries
+- **Week-over-Week Comparison**: Compare snapshots to see what changed since last week
+- **Few-Shot Learning**: Provide example outputs to match your preferred writing style
+- **Configurable Thresholds**: Customize the categorization threshold to match your sprint cadence
+- **AI Summaries**: Generate human-friendly summaries using Amazon Bedrock with Claude
 
 ## Usage
 
@@ -46,7 +52,7 @@ This will:
 2. Generate a categorized summary showing completed, continued, and started items
 3. Save the data to `./data/YYYY-MM-DD.json`
 
-### AI-Powered Summary
+### AI-Powered Summary (Recommended)
 
 ```bash
 pnpm weekly:ai
@@ -58,7 +64,36 @@ This will:
 
 1. Fetch current Jira issues
 2. Generate an AI-powered, human-friendly summary using Amazon Bedrock
-3. Save the data to `./data/YYYY-MM-DD.json`
+3. Use progress status to write "Completed...", "Started work on...", or "Continued progress on..."
+4. Save the data to `./data/YYYY-MM-DD.json`
+
+### With Week-over-Week Comparison
+
+```bash
+pnpm weekly --ai-summary --compare
+```
+
+This adds a comparison showing:
+- New tickets added this period
+- Tickets completed this period
+- Status changes
+- Tickets removed from tracking
+
+### Snapshot Only (No Summary)
+
+```bash
+pnpm weekly --snapshot-only
+```
+
+Just fetch and save the data without generating a summary.
+
+### Use Existing Snapshot
+
+```bash
+pnpm weekly --ai-summary --file ./data/2026-01-09.json
+```
+
+Generate a summary from a previously saved snapshot.
 
 ## Configuration
 
@@ -74,22 +109,48 @@ JIRA_TOKEN=your-jira-api-token-here
 JIRA_ASSIGNEE_EMAILS=member1@company.com,member2@company.com
 
 # Business Domains for AI Summary Categorization
-# Comma-separated list of domain names - the AI will categorize work into these exact domains
-BUSINESS_DOMAINS=Meetings,Workflows,User Management,Documents,RBAC (Role-Based Access Control),AI,Integrations
+# The AI will categorize work into these domains (plus "Other" as fallback)
+BUSINESS_DOMAINS=AI,Meetings,Integrations,PerformYard API,User Management,Documents,Workflows
 ```
 
-### Optional Configuration
+### Team & Filtering Configuration
 
 ```bash
-# AWS Configuration (for AI summaries)
-AWS_REGION=us-east-1
+# Your team/pod name (used in generated summaries)
+TEAM_NAME=Street Sharks Pod
 
-# LLM Settings
+# Issue types to exclude from summaries (e.g., automated tests)
+EXCLUDED_ISSUE_TYPES=Automated Test,Sub Test Execution
+
+# Whether to include sub-tasks (with parent context)
+INCLUDE_SUBTASKS=true
+```
+
+### Categorization Settings
+
+```bash
+# Days threshold for categorization (default: 7)
+# - Completed: Done within this many days
+# - Started: In progress for <= this many days  
+# - Continued: In progress for > this many days
+CATEGORIZATION_THRESHOLD_DAYS=7
+```
+
+### Few-Shot Examples (Advanced)
+
+Provide example outputs to teach the AI your preferred style:
+
+```bash
+# Separate multiple examples with "|||"
+FEW_SHOT_EXAMPLES=**AI:** Reorganized AI settings in the administration page, making it easier for users to manage AI-powered features. Fixed an issue with review cycle summarization.|||**Meetings:** Started work on implementing a new table-based landing page design for meetings.
+```
+
+### AWS/LLM Configuration
+
+```bash
+AWS_REGION=us-east-1
 LLM_MODEL=us.anthropic.claude-sonnet-4-20250514-v1:0
 LLM_TEMPERATURE=0.3
-
-# Application Settings
-DATA_DIRECTORY=./data
 ```
 
 See `.env.example` for all available options with detailed comments.
@@ -99,12 +160,15 @@ See `.env.example` for all available options with detailed comments.
 ```
 ├── src/
 │   ├── config/
-│   │   └── config.ts              # Configuration management
+│   │   ├── config.ts              # Configuration aggregation
+│   │   ├── app.config.ts          # App settings (thresholds, filtering)
+│   │   ├── jira.config.ts         # Jira connection settings
+│   │   └── llm.config.ts          # LLM/AI settings & few-shot examples
 │   ├── services/
-│   │   ├── jira-service.ts        # Jira API integration
-│   │   ├── llm-service.ts         # Amazon Bedrock integration
-│   │   ├── storage-service.ts     # File I/O operations
-│   │   ├── categorization-service.ts  # Ticket categorization
+│   │   ├── jira-service.ts        # Jira API integration & parent resolution
+│   │   ├── llm-service.ts         # Amazon Bedrock with progress-aware prompts
+│   │   ├── storage-service.ts     # File I/O & snapshot comparison
+│   │   ├── categorization-service.ts  # Configurable ticket categorization
 │   │   └── weekly-service.ts      # Orchestration layer
 │   ├── types/
 │   │   └── index.ts               # TypeScript type definitions
@@ -123,11 +187,51 @@ See `.env.example` for all available options with detailed comments.
 
 ### Issue Categorization
 
-The tool automatically categorizes Jira issues:
+The tool automatically categorizes Jira issues based on configurable thresholds:
 
-- **Completed**: Issues marked as "Done" within the last 7 days
-- **Continued**: Issues in progress (not "Done" or "TO DO") for more than 7 days
-- **Started**: Issues in progress (not "Done" or "TO DO") for less than 7 days
+- **Completed**: Issues marked as "Done" within the threshold days
+- **Started**: Issues in progress for <= threshold days (new work this period)
+- **Continued**: Issues in progress for > threshold days (ongoing work)
+
+The default threshold is 7 days, configurable via `CATEGORIZATION_THRESHOLD_DAYS`.
+
+### Progress-Aware AI Summaries
+
+When generating AI summaries, the tool:
+
+1. **Preserves progress status**: Each ticket is tagged as completed, started, or continued
+2. **Enriches context**: Fetches parent ticket summaries for sub-tasks
+3. **Uses domain hints**: Passes Jira labels and components to help categorization
+4. **Applies few-shot learning**: Uses your example outputs to match your style
+5. **Uses appropriate language**: 
+   - Completed → "Fixed...", "Completed...", "Resolved..."
+   - Started → "Started work on...", "Began implementing..."
+   - Continued → "Continued progress on...", "Making progress on..."
+
+### Issue Type Filtering
+
+Exclude noise from summaries by configuring `EXCLUDED_ISSUE_TYPES`:
+
+```bash
+# Filter out automated test tickets
+EXCLUDED_ISSUE_TYPES=Automated Test,Sub Test Execution
+```
+
+### Sub-Task Handling
+
+When `INCLUDE_SUBTASKS=true` (default), sub-tasks are included with their parent context:
+- Parent ticket summary is automatically fetched
+- Displayed as "Part of: [Parent Summary]"
+- Helps AI understand the broader context
+
+### Week-over-Week Comparison
+
+The `--compare` flag analyzes differences between snapshots:
+
+- **New tickets**: Issues added since the last snapshot
+- **Completed this period**: Issues that moved to "Done"
+- **Status changes**: All status transitions
+- **Removed tickets**: Issues no longer in the sprint
 
 ### Data Storage
 
@@ -135,19 +239,8 @@ All snapshots are saved as JSON files in the `./data/` directory with the format
 
 - Track progress over time
 - Generate historical reports
-- Maintain a record of team activity
-
-### AI Summaries
-
-When using the `--ai-summary` flag, the tool:
-
-1. Processes categorized tickets
-2. Sends them to Amazon Bedrock (Claude)
-3. Categorizes work into your team's **business domains** (defined in `BUSINESS_DOMAINS`)
-4. Generates human-friendly, non-technical descriptions
-5. Focuses on business value and outcomes
-
-The `BUSINESS_DOMAINS` environment variable is required and should contain a comma-separated list of your team's focus areas. The AI will organize all ticket summaries into these exact categories.
+- Compare week-over-week changes
+- Re-generate summaries from past data
 
 ## Architecture
 

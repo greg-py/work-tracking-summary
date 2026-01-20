@@ -5,7 +5,11 @@
   "main": "src/index.js",
   "scripts": {
     "weekly": "tsx src/index.ts",
-    "weekly:ai": "tsx src/index.ts --ai-summary"
+    "weekly:ai": "tsx src/index.ts --ai-summary",
+    "weekly:compare": "tsx src/index.ts --ai-summary --compare",
+    "snapshot": "tsx src/index.ts --snapshot-only",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
   },
   "keywords": [
     "jira",

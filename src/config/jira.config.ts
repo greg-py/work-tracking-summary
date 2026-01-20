@@ -49,7 +49,7 @@ export function getJiraConfig(): JiraConfig {
 
   const fields = getOptional(
     process.env.JIRA_FIELDS,
-    "assignee,status,created,summary,description,issuetype,statuscategorychangedate,parent,customfield_10026,sprint"
+    "assignee,status,created,summary,description,issuetype,statuscategorychangedate,parent,customfield_10026,sprint,labels,components"
   );
 
   const expand = getOptional(process.env.JIRA_EXPAND, "changelog");
@@ -64,4 +64,3 @@ export function getJiraConfig(): JiraConfig {
     expand,
   };
 }
-

@@ -1,7 +1,13 @@
 import { createAmazonBedrock } from "@ai-sdk/amazon-bedrock";
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 import { generateText } from "ai";
-import type { CategorizedTickets, Ticket } from "../types";
+import type {
+  CategorizedTickets,
+  Ticket,
+  LLMTicketContext,
+  TicketContext,
+  ProgressStatus,
+} from "../types";
 import { LLMConfig } from "../config/config";
 
 export class LLMService {
@@ -19,14 +25,14 @@ export class LLMService {
    * Generates a human-friendly summary of the weekly tickets using LLM
    */
   async generateWeeklySummary(tickets: CategorizedTickets): Promise<string> {
-    // Format the tickets into a list for the LLM
-    const ticketList = this.formatTicketsForLLM(tickets);
+    // Transform categorized tickets into enhanced LLM context
+    const ticketContext = this.buildTicketContext(tickets);
 
-    if (ticketList.trim() === "") {
+    if (ticketContext.totalCount === 0) {
       return "No tickets found for this week.";
     }
 
-    const prompt = this.buildPrompt(ticketList);
+    const prompt = this.buildPrompt(ticketContext);
 
     const { text } = await generateText({
       model: this.bedrock(this.config.model),
@@ -38,76 +44,201 @@ export class LLMService {
   }
 
   /**
-   * Formats the categorized tickets into a readable list for the LLM
+   * Transforms categorized tickets into enhanced context for LLM
+   * Preserves progress status and adds enriched metadata
    */
-  private formatTicketsForLLM(tickets: CategorizedTickets): string {
-    // Flatten all tickets into a single list
-    const allTickets: Ticket[] = [
-      ...tickets.completedItems,
-      ...tickets.continuedItems,
-      ...tickets.startedItems,
-    ];
-
-    if (allTickets.length === 0) {
-      return "";
-    }
-
-    // Format each ticket with both title and description
-    const formattedTickets = allTickets.map((ticket: Ticket) => {
-      let formatted = `[${ticket.ticketId}] ${ticket.summary}`;
-      if (ticket.description && ticket.description.trim() !== "") {
-        formatted += `\nDescription: ${ticket.description}`;
-      }
-      return formatted;
-    });
-
-    return formattedTickets.join("\n\n");
+  private buildTicketContext(tickets: CategorizedTickets): LLMTicketContext {
+    return {
+      completed: tickets.completedItems.map((t) => this.ticketToContext(t)),
+      continued: tickets.continuedItems.map((t) => this.ticketToContext(t)),
+      started: tickets.startedItems.map((t) => this.ticketToContext(t)),
+      totalCount:
+        tickets.completedItems.length +
+        tickets.continuedItems.length +
+        tickets.startedItems.length,
+    };
   }
 
   /**
-   * Builds the prompt for the LLM
+   * Converts a Ticket to TicketContext with enriched information
    */
-  private buildPrompt(ticketList: string): string {
-    const domainsFormatted = this.config.businessDomains
-      .map((d) => `- ${d}`)
-      .join("\n");
+  private ticketToContext(ticket: Ticket): TicketContext {
+    // Build parent context string if available
+    let parentContext: string | null = null;
+    if (ticket.parent && ticket.parentSummary) {
+      parentContext = `Part of: ${ticket.parentSummary} (${ticket.parent})`;
+    } else if (ticket.parent) {
+      parentContext = `Part of: ${ticket.parent}`;
+    }
 
-    return `Analyze the following software development tickets and create a brief weekly summary.
+    return {
+      ticketId: ticket.ticketId,
+      summary: ticket.summary,
+      description: ticket.description,
+      progressStatus: ticket.progressStatus,
+      labels: ticket.labels,
+      components: ticket.components,
+      parentContext,
+      daysInCurrentStatus: ticket.daysInCurrentStatus,
+    };
+  }
 
-IMPORTANT: This summary will be shared company-wide with non-technical audiences. Write in simple, clear language that anyone can understand.
+  /**
+   * Formats a single ticket for LLM consumption with full context
+   */
+  private formatTicketForLLM(ticket: TicketContext): string {
+    const lines: string[] = [];
 
-CRITICAL REQUIREMENT - DOMAIN CATEGORIZATION:
-You MUST categorize ALL work into ONLY the following business domains. Do not create your own categories or use different names:
+    // Status indicator
+    const statusPrefix = this.getStatusPrefix(ticket.progressStatus);
+    lines.push(`${statusPrefix} [${ticket.ticketId}] ${ticket.summary}`);
+
+    // Add labels/components as domain hints
+    if (ticket.labels.length > 0 || ticket.components.length > 0) {
+      const hints: string[] = [];
+      if (ticket.labels.length > 0) {
+        hints.push(`Labels: ${ticket.labels.join(", ")}`);
+      }
+      if (ticket.components.length > 0) {
+        hints.push(`Components: ${ticket.components.join(", ")}`);
+      }
+      lines.push(`  Domain hints: ${hints.join(" | ")}`);
+    }
+
+    // Add parent context if available
+    if (ticket.parentContext) {
+      lines.push(`  ${ticket.parentContext}`);
+    }
+
+    // Add description if meaningful
+    if (
+      ticket.description &&
+      ticket.description.trim() !== "" &&
+      ticket.description !== "No description"
+    ) {
+      // Truncate very long descriptions
+      const maxDescLength = 500;
+      let desc = ticket.description.trim();
+      if (desc.length > maxDescLength) {
+        desc = desc.substring(0, maxDescLength) + "...";
+      }
+      lines.push(`  Description: ${desc}`);
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Gets a human-readable status prefix for ticket formatting
+   */
+  private getStatusPrefix(status: ProgressStatus): string {
+    switch (status) {
+      case "completed":
+        return "[COMPLETED]";
+      case "continued":
+        return "[IN PROGRESS - ongoing]";
+      case "started":
+        return "[STARTED THIS WEEK]";
+      default:
+        return "[UNKNOWN]";
+    }
+  }
+
+  /**
+   * Formats all tickets grouped by progress status
+   */
+  private formatTicketsForLLM(context: LLMTicketContext): string {
+    const sections: string[] = [];
+
+    if (context.completed.length > 0) {
+      sections.push("=== COMPLETED THIS WEEK ===");
+      sections.push(
+        context.completed.map((t) => this.formatTicketForLLM(t)).join("\n\n")
+      );
+    }
+
+    if (context.started.length > 0) {
+      sections.push("\n=== STARTED THIS WEEK ===");
+      sections.push(
+        context.started.map((t) => this.formatTicketForLLM(t)).join("\n\n")
+      );
+    }
+
+    if (context.continued.length > 0) {
+      sections.push("\n=== CONTINUED FROM PREVIOUS WEEKS ===");
+      sections.push(
+        context.continued.map((t) => this.formatTicketForLLM(t)).join("\n\n")
+      );
+    }
+
+    return sections.join("\n");
+  }
+
+  /**
+   * Builds the few-shot examples section if configured
+   */
+  private buildFewShotExamplesSection(): string {
+    if (this.config.fewShotExamples.length === 0) {
+      return "";
+    }
+
+    const examples = this.config.fewShotExamples
+      .map((example, index) => `Example ${index + 1}:\n${example}`)
+      .join("\n\n");
+
+    return `
+EXAMPLES OF DESIRED OUTPUT STYLE:
+The following are real examples of the output format and style we want. Match this style closely:
+
+${examples}
+
+---
+`;
+  }
+
+  /**
+   * Builds the complete prompt for the LLM
+   */
+  private buildPrompt(context: LLMTicketContext): string {
+    // Build domains list with "Other" as fallback
+    const allDomains = [...this.config.businessDomains, "Other"];
+    const domainsFormatted = allDomains.map((d) => `- ${d}`).join("\n");
+
+    const ticketList = this.formatTicketsForLLM(context);
+    const fewShotSection = this.buildFewShotExamplesSection();
+
+    return `You are writing a weekly update for the ${this.config.teamName}. This summary will be shared with leadership and non-technical stakeholders.
+
+${fewShotSection}IMPORTANT GUIDELINES:
+- Write in simple, clear language that anyone can understand
+- Focus on business value and user benefits, not technical details
+- Avoid jargon, acronyms, and technical terms (no "API", "endpoint", "refactor", etc.)
+- Use action-oriented language that describes outcomes
+
+PROGRESS STATUS INDICATORS:
+The tickets below are marked with their progress status:
+- [COMPLETED] = Work that was finished this week - use phrases like "Fixed...", "Completed...", "Resolved..."
+- [STARTED THIS WEEK] = New work that began this week - use phrases like "Started work on...", "Began implementing..."
+- [IN PROGRESS - ongoing] = Work continuing from previous weeks - use phrases like "Continued progress on...", "Making progress on..."
+
+DOMAIN CATEGORIZATION:
+Categorize ALL work into these business domains. Use the "Other" category for work that doesn't fit elsewhere:
 
 ${domainsFormatted}
 
-Your task:
-1. Review all ticket titles and descriptions to understand the work completed and in progress
-2. Categorize each piece of work into one of the EXACT domains listed above
-3. Only include domains that have relevant work (aim for 3-5 sections total)
-4. Write a SHORT, punchy summary for each domain (1-2 sentences max)
+Use the Labels and Components hints on each ticket to help determine the correct domain.
 
-Format your response as bullet points where:
-- Each bullet starts with the EXACT domain name in bold (e.g., "**Workflows:**")
-- Follow with a BRIEF summary (1-2 sentences) of the key work in that area
-- Use simple, non-technical language - avoid jargon, acronyms, and technical terms (no "API", "RESTful", "ECS", etc.)
-- Focus on the business value or user benefit, not technical implementation
-- Be concise and direct - focus on the most important accomplishments
-- Avoid ticket numbers and excessive detail
-- Write for a general company-wide audience
-- Skip domains that have no relevant work this week
+FORMAT REQUIREMENTS:
+- Start each section with the domain name in bold followed by a colon (e.g., "**AI:**")
+- Write 1-2 concise sentences per domain summarizing the key work
+- Combine related tickets into cohesive summaries
+- Only include domains that have relevant work
+- Aim for 3-6 domain sections total
 
-Example format:
-**Workflows:** Made improvements to review workflows so deleted templates can still be used, streamlined the process for creating and managing review forms.
-
-**User Management:** Enhanced user onboarding experience with clearer instructions and faster account setup.
-
-**Documents:** Improved document sharing capabilities and fixed issues with file uploads.
-
-Now analyze these tickets:
+TICKETS TO SUMMARIZE:
 
 ${ticketList}
 
-Provide 3-5 bullet points using ONLY the exact domain names listed above. Skip any domains with no relevant work. Keep each bullet concise (1-2 sentences) and non-technical.`;
+Generate the weekly summary now. Remember to use appropriate language based on whether work was completed, started, or is ongoing.`;
   }
 }

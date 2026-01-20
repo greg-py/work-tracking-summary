@@ -1,10 +1,6 @@
 import axios, { AxiosError } from "axios";
 import { JiraConfig } from "../config/config";
-import {
-  JiraIssue,
-  ProcessedIssue,
-  ProcessedIssuesMap,
-} from "../types";
+import { JiraIssue, ProcessedIssue, ProcessedIssuesMap } from "../types";
 import { extractTextFromJiraDescription } from "../utils/jira-description-parser";
 
 /**
@@ -51,9 +47,9 @@ export class JiraService {
   private async fetchJiraIssuesWithJql(jql: string): Promise<JiraIssue[]> {
     const url = `${
       this.config.url
-    }/rest/api/3/search/jql?jql=${encodeURIComponent(
-      jql
-    )}&maxResults=${this.config.maxResults}&fields=${this.config.fields}&expand=${this.config.expand}`;
+    }/rest/api/3/search/jql?jql=${encodeURIComponent(jql)}&maxResults=${
+      this.config.maxResults
+    }&fields=${this.config.fields}&expand=${this.config.expand}`;
 
     try {
       const response = await axios.get<{ issues: JiraIssue[] }>(url, {
@@ -113,6 +109,8 @@ export class JiraService {
       statuscategorychangedate,
       parent,
       customfield_10026,
+      labels,
+      components,
     } = fields;
 
     const parsedDescription = description?.content
@@ -122,6 +120,15 @@ export class JiraService {
     const daysInCurrentStatus = this.calculateDaysInStatus(
       statuscategorychangedate
     );
+
+    // Extract parent summary if available (from expanded parent fields)
+    const parentSummary = parent?.fields?.summary || null;
+
+    // Extract labels as string array
+    const extractedLabels = labels || [];
+
+    // Extract component names from component objects
+    const extractedComponents = components ? components.map((c) => c.name) : [];
 
     return {
       ticketId: key,
@@ -134,6 +141,9 @@ export class JiraService {
       description: parsedDescription,
       storyPoints: customfield_10026,
       parent: parent ? parent.key : null,
+      parentSummary,
+      labels: extractedLabels,
+      components: extractedComponents,
       datePulled,
     };
   }
@@ -157,13 +167,83 @@ export class JiraService {
   private buildAssigneeJql({
     sprint = "current",
   }: FetchJiraIssuesParams = {}): string {
-    const assigneesClause = `assignee IN (${this.config.assigneeEmails.map(
-      (assignee) => `"${assignee}"`
-    ).join(", ")})`;
+    const assigneesClause = `assignee IN (${this.config.assigneeEmails
+      .map((assignee) => `"${assignee}"`)
+      .join(", ")})`;
 
     return sprint === "current"
       ? `sprint in openSprints() AND ${assigneesClause}`
       : `sprint in closedSprints() AND ${assigneesClause}`;
+  }
+
+  /**
+   * Fetches a single Jira issue by key
+   * @param issueKey - The Jira issue key (e.g., "PY-1234")
+   * @returns Promise resolving to the issue or null if not found
+   */
+  private async fetchSingleIssue(issueKey: string): Promise<JiraIssue | null> {
+    const url = `${this.config.url}/rest/api/3/issue/${issueKey}?fields=summary`;
+
+    try {
+      const response = await axios.get<JiraIssue>(url, {
+        headers: this.headers,
+      });
+      return response.data;
+    } catch {
+      // Issue not found or not accessible
+      return null;
+    }
+  }
+
+  /**
+   * Resolves parent ticket summaries for issues that have parents but no summary
+   * @param issues - Array of processed issues
+   * @returns Promise resolving to issues with resolved parent summaries
+   */
+  private async resolveParentSummaries(
+    issues: ProcessedIssue[]
+  ): Promise<ProcessedIssue[]> {
+    // Find issues with parent but no parent summary
+    const issuesNeedingParent = issues.filter(
+      (issue) => issue.parent && !issue.parentSummary
+    );
+
+    if (issuesNeedingParent.length === 0) {
+      return issues;
+    }
+
+    // Get unique parent keys
+    const parentKeys = [
+      ...new Set(issuesNeedingParent.map((issue) => issue.parent!)),
+    ];
+
+    // Fetch parent summaries in parallel (batch of 10 to avoid overwhelming API)
+    const parentSummaries = new Map<string, string>();
+    const batchSize = 10;
+
+    for (let i = 0; i < parentKeys.length; i += batchSize) {
+      const batch = parentKeys.slice(i, i + batchSize);
+      const results = await Promise.all(
+        batch.map((key) => this.fetchSingleIssue(key))
+      );
+
+      results.forEach((result, index) => {
+        if (result?.fields?.summary) {
+          parentSummaries.set(batch[index], result.fields.summary);
+        }
+      });
+    }
+
+    // Update issues with resolved parent summaries
+    return issues.map((issue) => {
+      if (issue.parent && !issue.parentSummary) {
+        const resolvedSummary = parentSummaries.get(issue.parent);
+        if (resolvedSummary) {
+          return { ...issue, parentSummary: resolvedSummary };
+        }
+      }
+      return issue;
+    });
   }
 
   /**
@@ -197,7 +277,26 @@ export class JiraService {
       }
     });
 
-    return this.processIssues(allIssues);
+    // Process issues first
+    const processedMap = this.processIssues(allIssues);
+
+    // Resolve parent summaries for all issues
+    const allProcessedIssues = Object.values(processedMap).flat();
+    const resolvedIssues = await this.resolveParentSummaries(
+      allProcessedIssues
+    );
+
+    // Rebuild the map with resolved issues
+    const resolvedMap: ProcessedIssuesMap = {};
+    resolvedIssues.forEach((issue) => {
+      if (resolvedMap[issue.assignee]) {
+        resolvedMap[issue.assignee].push(issue);
+      } else {
+        resolvedMap[issue.assignee] = [issue];
+      }
+    });
+
+    return resolvedMap;
   }
 
   /**

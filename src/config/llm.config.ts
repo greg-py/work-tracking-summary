@@ -8,6 +8,10 @@ export interface LLMConfig {
   temperature: number;
   region: string;
   businessDomains: string[];
+  /** Custom example summaries to guide the LLM output style */
+  fewShotExamples: string[];
+  /** Team/pod name for personalized output */
+  teamName: string;
 }
 
 /**
@@ -27,6 +31,20 @@ function parseBusinessDomains(domainsRaw: string): string[] {
   }
 
   return domains;
+}
+
+/**
+ * Parses few-shot examples from a delimiter-separated string
+ * Examples are separated by "|||" to allow for complex multi-line examples
+ */
+function parseFewShotExamples(raw: string): string[] {
+  if (!raw || raw.trim() === "") {
+    return [];
+  }
+  return raw
+    .split("|||")
+    .map((e) => e.trim())
+    .filter((e) => e.length > 0);
 }
 
 /**
@@ -51,6 +69,14 @@ export function getLLMConfig(): LLMConfig {
   );
   const businessDomains = parseBusinessDomains(domainsRaw);
 
+  // Few-shot examples are optional
+  const fewShotExamples = parseFewShotExamples(
+    getOptional(process.env.FEW_SHOT_EXAMPLES, "")
+  );
+
+  // Team name is optional
+  const teamName = getOptional(process.env.TEAM_NAME, "Engineering Team");
+
   // Validate temperature range
   if (isNaN(temperature) || temperature < 0 || temperature > 1) {
     throw new Error(
@@ -64,5 +90,7 @@ export function getLLMConfig(): LLMConfig {
     temperature,
     region,
     businessDomains,
+    fewShotExamples,
+    teamName,
   };
 }
