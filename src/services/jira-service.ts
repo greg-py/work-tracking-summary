@@ -161,13 +161,16 @@ export class JiraService {
 
   /**
    * Builds a JQL query for specified assignees
-   * @param inActiveSprint - Whether to limit to active sprint issues
+   * @param sprint - Whether to query current or previous sprint
+   * @param emails - Optional list of emails to query (defaults to config assigneeEmails)
    * @returns JQL query string
    */
-  private buildAssigneeJql({
-    sprint = "current",
-  }: FetchJiraIssuesParams = {}): string {
-    const assigneesClause = `assignee IN (${this.config.assigneeEmails
+  private buildAssigneeJql(
+    sprint: "current" | "previous" = "current",
+    emails?: string[]
+  ): string {
+    const emailList = emails || this.config.assigneeEmails;
+    const assigneesClause = `assignee IN (${emailList
       .map((assignee) => `"${assignee}"`)
       .join(", ")})`;
 
@@ -255,8 +258,8 @@ export class JiraService {
     params: FetchJiraIssuesParams = {}
   ): Promise<ProcessedIssuesMap> {
     // Always fetch both current and previous sprint issues
-    const currentSprintJql = this.buildAssigneeJql({ sprint: "current" });
-    const previousSprintJql = this.buildAssigneeJql({ sprint: "previous" });
+    const currentSprintJql = this.buildAssigneeJql("current");
+    const previousSprintJql = this.buildAssigneeJql("previous");
 
     // Fetch both sprints in parallel
     const [currentSprintIssues, previousSprintIssues] = await Promise.all([
@@ -305,5 +308,104 @@ export class JiraService {
    */
   public async fetchJiraIssuesForActiveSprint(): Promise<ProcessedIssuesMap> {
     return this.fetchJiraIssues();
+  }
+
+  /**
+   * Fetches and processes Jira issues for grooming engineers
+   * Uses GROOMING_ENGINEER_EMAILS if set, otherwise falls back to JIRA_ASSIGNEE_EMAILS
+   * Looks back GROOMING_LOOKBACK_DAYS (default 90) for work history context
+   * @returns Promise resolving to processed issues map for grooming engineers
+   */
+  public async fetchGroomingEngineerIssues(): Promise<ProcessedIssuesMap> {
+    const emails = this.config.groomingEngineerEmails;
+    const lookbackDays = this.config.groomingLookbackDays;
+
+    // Build time-based JQL for better specialization context
+    const assigneesClause = `assignee IN (${emails
+      .map((email) => `"${email}"`)
+      .join(", ")})`;
+
+    // Fetch issues updated within the lookback period
+    const jql = `${assigneesClause} AND updated >= -${lookbackDays}d ORDER BY updated DESC`;
+
+    const issues = await this.fetchJiraIssuesWithJql(jql);
+
+    // Process issues
+    const processedMap = this.processIssues(issues);
+
+    // Resolve parent summaries for all issues
+    const allProcessedIssues = Object.values(processedMap).flat();
+    const resolvedIssues = await this.resolveParentSummaries(
+      allProcessedIssues
+    );
+
+    // Rebuild the map with resolved issues
+    const resolvedMap: ProcessedIssuesMap = {};
+    resolvedIssues.forEach((issue) => {
+      if (resolvedMap[issue.assignee]) {
+        resolvedMap[issue.assignee].push(issue);
+      } else {
+        resolvedMap[issue.assignee] = [issue];
+      }
+    });
+
+    return resolvedMap;
+  }
+
+  /**
+   * Fetches specific Jira issues by their keys
+   * @param issueKeys - Array of Jira issue keys (e.g., ["PY-1234", "PY-5678"])
+   * @returns Promise resolving to array of processed issues (missing keys are omitted)
+   */
+  public async fetchIssuesByKeys(
+    issueKeys: string[]
+  ): Promise<{ found: ProcessedIssue[]; notFound: string[] }> {
+    if (issueKeys.length === 0) {
+      return { found: [], notFound: [] };
+    }
+
+    // Build JQL to fetch all specified keys
+    const keysClause = issueKeys.map((key) => `"${key}"`).join(", ");
+    const jql = `key IN (${keysClause})`;
+
+    try {
+      const issues = await this.fetchJiraIssuesWithJql(jql);
+      const datePulled = new Date().toISOString();
+
+      // Process fetched issues
+      const processedIssues = issues.map((issue) =>
+        this.createProcessedIssue({
+          key: issue.key,
+          fields: issue.fields,
+          datePulled,
+        })
+      );
+
+      // Resolve parent summaries
+      const resolvedIssues =
+        await this.resolveParentSummaries(processedIssues);
+
+      // Determine which keys were not found
+      const foundKeys = new Set(resolvedIssues.map((i) => i.ticketId));
+      const notFound = issueKeys.filter((key) => !foundKeys.has(key));
+
+      return { found: resolvedIssues, notFound };
+    } catch (error) {
+      console.error(`Error fetching issues by keys: ${error}`);
+      // Return all keys as not found on error
+      return { found: [], notFound: issueKeys };
+    }
+  }
+
+  /**
+   * Fetches a single Jira issue by key with full details
+   * @param issueKey - The Jira issue key (e.g., "PY-1234")
+   * @returns Promise resolving to the processed issue or null if not found
+   */
+  public async fetchIssueByKey(
+    issueKey: string
+  ): Promise<ProcessedIssue | null> {
+    const { found } = await this.fetchIssuesByKeys([issueKey]);
+    return found.length > 0 ? found[0] : null;
   }
 }

@@ -10,6 +10,7 @@ import { LLMService } from "./services/llm-service";
 import { StorageService } from "./services/storage-service";
 import { CategorizationService } from "./services/categorization-service";
 import { WeeklyService } from "./services/weekly-service";
+import { GroomingService } from "./services/grooming-service";
 import {
   displayWeeklySummary,
   displayAISummary,
@@ -39,6 +40,15 @@ program
     "-f, --file <path>",
     "Use a specific snapshot file instead of fetching new data"
   )
+  .option("-g, --groom", "Generate grooming assignment recommendations")
+  .option(
+    "-i, --input <path>",
+    "Path to PM ticket list file (required with --groom)"
+  )
+  .option(
+    "-v, --verbose",
+    "Include detailed reasoning in grooming recommendations"
+  )
   .action(async (options) => {
     try {
       // Validate configuration before starting
@@ -50,6 +60,12 @@ program
       const llmService = new LLMService(config.llm);
       const storageService = new StorageService(config.app.dataDirectory);
       const categorizationService = new CategorizationService(config.app);
+
+      // Handle grooming mode
+      if (options.groom) {
+        await handleGroomingMode(jiraService, llmService, options);
+        return;
+      }
 
       const weeklyService = new WeeklyService(
         jiraService,
@@ -124,6 +140,58 @@ program
       process.exit(1);
     }
   });
+
+/**
+ * Handles the grooming assignment mode
+ */
+async function handleGroomingMode(
+  jiraService: JiraService,
+  llmService: LLMService,
+  options: { input?: string; verbose?: boolean }
+): Promise<void> {
+  // Validate required input option
+  if (!options.input) {
+    console.error(
+      chalk.red("\n❌ Error:"),
+      "The --input option is required when using --groom"
+    );
+    console.log(
+      chalk.gray("Usage: weekly-jira-tracker --groom --input tickets.txt")
+    );
+    process.exit(1);
+  }
+
+  console.log(chalk.blue("🔍 Starting grooming assignment analysis..."));
+
+  const groomingService = new GroomingService(jiraService, llmService);
+  const verbose = options.verbose || false;
+
+  const parseSpinner = ora("Parsing ticket list and fetching Jira data...").start();
+  try {
+    parseSpinner.text = "Running multi-trial consensus analysis (5 parallel trials)...";
+    const result = await groomingService.generateRecommendations(
+      options.input,
+      verbose
+    );
+    parseSpinner.succeed("Consensus recommendations generated!");
+
+    // Display results
+    console.log(
+      "\n" + chalk.bold.blue("📋 Grooming Assignment Recommendations")
+    );
+    console.log(groomingService.formatRecommendations(result, verbose));
+
+    // Display summary stats
+    console.log(
+      chalk.gray(
+        `\n${result.recommendations.length} tickets analyzed across ${result.engineerProfiles.length} engineers`
+      )
+    );
+  } catch (error) {
+    parseSpinner.fail("Failed to generate recommendations");
+    throw error;
+  }
+}
 
 // Parse command line arguments
 program.parse(process.argv);

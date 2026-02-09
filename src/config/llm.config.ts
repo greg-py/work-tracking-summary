@@ -53,7 +53,7 @@ function parseFewShotExamples(raw: string): string[] {
 export function getLLMConfig(): LLMConfig {
   const model = getOptional(
     process.env.LLM_MODEL,
-    "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
   );
 
   const temperature = parseFloat(

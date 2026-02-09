@@ -13,6 +13,10 @@ export interface JiraConfig {
   username: string;
   token: string;
   assigneeEmails: string[];
+  /** Engineers to consider for grooming assignments (defaults to assigneeEmails) */
+  groomingEngineerEmails: string[];
+  /** Number of days to look back for engineer work history in grooming (default: 90) */
+  groomingLookbackDays: number;
   maxResults: number;
   fields: string;
   expand: string;
@@ -41,6 +45,28 @@ export function getJiraConfig(): JiraConfig {
   // Parse and validate assignee emails
   const assigneeEmails = validateEmailList(assigneeEmailsRaw);
 
+  // Parse grooming engineer emails (optional, falls back to assigneeEmails)
+  const groomingEngineerEmailsRaw = getOptional(
+    process.env.GROOMING_ENGINEER_EMAILS,
+    ""
+  );
+  const groomingEngineerEmails = groomingEngineerEmailsRaw
+    ? validateEmailList(groomingEngineerEmailsRaw)
+    : assigneeEmails;
+
+  // Parse grooming lookback days (default: 90 days)
+  const groomingLookbackDays = parseInt(
+    getOptional(process.env.GROOMING_LOOKBACK_DAYS, "90"),
+    10
+  );
+
+  if (isNaN(groomingLookbackDays) || groomingLookbackDays < 1) {
+    throw new Error(
+      `Invalid GROOMING_LOOKBACK_DAYS: ${process.env.GROOMING_LOOKBACK_DAYS}\n` +
+        `Expected a positive integer (default: 90)`
+    );
+  }
+
   // Optional fields with defaults
   const maxResults = parseInt(
     getOptional(process.env.JIRA_MAX_RESULTS, "1000"),
@@ -59,6 +85,8 @@ export function getJiraConfig(): JiraConfig {
     username,
     token,
     assigneeEmails,
+    groomingEngineerEmails,
+    groomingLookbackDays,
     maxResults,
     fields,
     expand,

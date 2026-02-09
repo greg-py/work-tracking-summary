@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+sample-tickets.txt
 
 # next.js
 /.next/

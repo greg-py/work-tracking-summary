@@ -8,6 +8,8 @@
     "weekly:ai": "tsx src/index.ts --ai-summary",
     "weekly:compare": "tsx src/index.ts --ai-summary --compare",
     "snapshot": "tsx src/index.ts --snapshot-only",
+    "groom": "tsx src/index.ts --groom --input sample-tickets.txt",
+    "groom:verbose": "tsx src/index.ts --groom --verbose --input sample-tickets.txt",
     "build": "tsc",
     "typecheck": "tsc --noEmit"
   },
